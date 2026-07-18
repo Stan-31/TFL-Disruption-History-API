@@ -5,6 +5,8 @@ from app.config import Settings
 
 
 def test_settings_reads_required_and_default_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
     monkeypatch.setenv("TFL_APP_KEY", "test-key")
     monkeypatch.setenv(
         "DATABASE_URL", "postgresql+psycopg://tfl:tfl@localhost:5432/tfl_disruption_history"
