@@ -5,9 +5,14 @@ This service polls it on a schedule, persists every observation, and exposes the
 historical record TfL doesn't: how often each line is disrupted, when, for how long,
 and with what severity.
 
-Status: **Phase 2** -- database schema, TfL client, and an in-process poller that
-persists line status history to Postgres on a schedule (default: every 60s, see
-`TFL_POLL_INTERVAL_SECONDS`). No read/query API endpoints yet (see later phases).
+Status: **Phase 3** -- database schema, TfL client, an in-process poller
+(default: every 60s, see `TFL_POLL_INTERVAL_SECONDS`), and a read API over the
+accumulated history:
+
+- `GET /lines` -- every polled line with its current status
+- `GET /lines/{line_id}/history` -- paginated status history for one line, most
+  recent first (`limit`/`offset`/`since` query params), `404` for an unknown
+  `line_id`
 
 ## Stack
 

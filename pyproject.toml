@@ -39,7 +39,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N", "C4", "A", "PL", "RUF"]
 known-first-party = ["app"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["PLR2004"]
+"tests/*" = ["PLR2004", "PLR0913"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.12"
