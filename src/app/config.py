@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     tfl_app_key: str
     database_url: PostgresDsn
 
+    tfl_poll_interval_seconds: int = 60
+    tfl_modes: str = "tube,overground,dlr,elizabeth-line"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -7,6 +7,28 @@ on:
 jobs:
   lint-type-test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tfl
+          POSTGRES_PASSWORD: tfl
+          POSTGRES_DB: tfl_disruption_history
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tfl -d tfl_disruption_history"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      ENVIRONMENT: ci
+      LOG_LEVEL: INFO
+      TFL_APP_KEY: test-key
+      DATABASE_URL: postgresql+psycopg://tfl:tfl@localhost:5432/tfl_disruption_history
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,10 +51,8 @@ jobs:
       - name: mypy
         run: mypy src tests
 
+      - name: Run migrations
+        run: alembic upgrade head
+
       - name: pytest
         run: pytest -v
-        env:
-          ENVIRONMENT: ci
-          LOG_LEVEL: INFO
-          TFL_APP_KEY: test-key
-          DATABASE_URL: postgresql+psycopg://tfl:tfl@localhost:5432/tfl_disruption_history
