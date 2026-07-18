@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -36,3 +37,10 @@ class LineHistoryPage(BaseModel):
     limit: int
     offset: int
     items: list[LineStatusPeriodOut]
+
+
+class HealthStatus(BaseModel):
+    status: Literal["ok", "degraded"]
+    database: Literal["ok"]
+    last_successful_poll_at: datetime | None
+    poll_interval_seconds: int

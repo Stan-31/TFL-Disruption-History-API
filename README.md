@@ -5,7 +5,7 @@ This service polls it on a schedule, persists every observation, and exposes the
 historical record TfL doesn't: how often each line is disrupted, when, for how long,
 and with what severity.
 
-Status: **Phase 3** -- database schema, TfL client, an in-process poller
+Status: **Phase 4** -- database schema, TfL client, an in-process poller
 (default: every 60s, see `TFL_POLL_INTERVAL_SECONDS`), and a read API over the
 accumulated history:
 
@@ -13,6 +13,9 @@ accumulated history:
 - `GET /lines/{line_id}/history` -- paginated status history for one line, most
   recent first (`limit`/`offset`/`since` query params), `404` for an unknown
   `line_id`
+- `GET /health` -- DB connectivity and last successful poll time; `status` is
+  `"degraded"` if the last poll is more than 3x `TFL_POLL_INTERVAL_SECONDS`
+  old (or there's never been one), `503` if the database itself is unreachable
 
 ## Stack
 
@@ -67,6 +70,4 @@ without leaving data behind.
   host against the dockerised Postgres. When `app` runs *inside* docker-compose,
   `DATABASE_URL` is overridden to point at the `postgres` service hostname instead --
   see `docker-compose.yml`.
-- `GET /` is a placeholder service-metadata endpoint, not a health check. A real
-  `/health` (DB connectivity + last poll time) lands in a later phase once there's a
-  database to check.
+- `GET /` is service metadata, not a health check -- use `GET /health` for that.
