@@ -8,6 +8,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY pyproject.toml ./
 COPY src ./src
 
+# Trust any locally-provided CA certs (e.g. corporate/network TLS-inspection
+# proxies) so pip can reach PyPI. docker/certs/ is empty and gitignored by
+# default, so this is a no-op on machines without such a proxy (e.g. CI).
+RUN --mount=type=bind,source=docker/certs,target=/tmp/certs \
+    cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ 2>/dev/null || true; \
+    update-ca-certificates
+
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
