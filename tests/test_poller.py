@@ -6,7 +6,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import LineStatusPeriod
-from app.poller import LineObservation, apply_observations
+from app.poller import (
+    MAX_BACKOFF_SECONDS,
+    LineObservation,
+    apply_observations,
+    next_backoff_seconds,
+)
 
 
 def make_observation(status_severity: int = 10, reason: str | None = None) -> LineObservation:
@@ -104,3 +109,18 @@ def test_partial_unique_index_prevents_two_open_periods(db_session: Session) -> 
     )
     with pytest.raises(IntegrityError):
         db_session.flush()
+
+
+def test_next_backoff_seconds_no_backoff_below_two_failures() -> None:
+    assert next_backoff_seconds(60, 0) == 60
+    assert next_backoff_seconds(60, 1) == 60
+
+
+def test_next_backoff_seconds_doubles_on_repeated_failures() -> None:
+    assert next_backoff_seconds(60, 2) == 120
+    assert next_backoff_seconds(60, 3) == 240
+    assert next_backoff_seconds(60, 4) == 480
+
+
+def test_next_backoff_seconds_caps_at_max() -> None:
+    assert next_backoff_seconds(60, 20) == MAX_BACKOFF_SECONDS

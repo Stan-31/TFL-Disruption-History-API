@@ -13,6 +13,21 @@ from app.tfl_client import TflLine, TflLineStatus, fetch_line_statuses
 
 logger = logging.getLogger(__name__)
 
+MAX_BACKOFF_SECONDS = 1800  # 30 minutes
+
+
+def next_backoff_seconds(base_interval: int, consecutive_failures: int) -> int:
+    """Delay before the next poll attempt, given a run of consecutive failures.
+
+    A single failure doesn't back off at all -- only from the second
+    consecutive failure onward does the delay start doubling, capped at
+    MAX_BACKOFF_SECONDS.
+    """
+    if consecutive_failures <= 1:
+        return base_interval
+    backoff = base_interval * int(2 ** (consecutive_failures - 1))
+    return min(backoff, MAX_BACKOFF_SECONDS)
+
 
 @dataclass(frozen=True)
 class LineObservation:
@@ -118,6 +133,7 @@ async def run_poll_loop(
     app_key: str,
     interval_seconds: int,
 ) -> None:
+    consecutive_failures = 0
     async with httpx.AsyncClient() as client:
         while True:
             try:
@@ -125,6 +141,10 @@ async def run_poll_loop(
                 observations = to_observations(lines)
                 await asyncio.to_thread(_poll_once, session_factory, observations)
                 logger.info("Polled %d line(s)", len(observations))
+                consecutive_failures = 0
             except Exception:
-                logger.exception("Poll iteration failed, will retry next interval")
-            await asyncio.sleep(interval_seconds)
+                consecutive_failures += 1
+                logger.exception(
+                    "Poll iteration failed (%d consecutive), backing off", consecutive_failures
+                )
+            await asyncio.sleep(next_backoff_seconds(interval_seconds, consecutive_failures))
