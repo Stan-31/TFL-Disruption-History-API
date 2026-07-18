@@ -5,7 +5,7 @@ This service polls it on a schedule, persists every observation, and exposes the
 historical record TfL doesn't: how often each line is disrupted, when, for how long,
 and with what severity.
 
-Status: **Phase 5** -- database schema, TfL client, an in-process poller
+Status: **Phase 6** -- database schema, TfL client, an in-process poller
 (default: every 60s, see `TFL_POLL_INTERVAL_SECONDS`, with exponential backoff
 up to 30 minutes on repeated failures), and a read API over the accumulated
 history:
@@ -14,6 +14,10 @@ history:
 - `GET /lines/{line_id}/history` -- paginated status history for one line, most
   recent first (`limit`/`offset`/`since` query params), `404` for an unknown
   `line_id`
+- `GET /lines/{line_id}/stats` -- disruption stats for one line over a window
+  (`since`/`until` query params, defaults to full recorded history through
+  now): total/disrupted seconds, uptime %, disruption count. `404` for an
+  unknown `line_id`
 - `GET /health` -- DB connectivity and last successful poll time; `status` is
   `"degraded"` if the last poll is more than 3x `TFL_POLL_INTERVAL_SECONDS`
   old (or there's never been one), `503` if the database itself is unreachable

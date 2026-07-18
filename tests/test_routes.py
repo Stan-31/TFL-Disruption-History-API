@@ -130,3 +130,25 @@ def test_get_line_history_since_filter(client: TestClient, db_session: Session) 
     assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert body["total"] == 1
+
+
+def test_get_line_stats_404_for_unknown_line(client: TestClient) -> None:
+    response = client.get("/lines/bakerloo/stats")
+    assert response.status_code == HTTPStatus.NOT_FOUND
+
+
+def test_get_line_stats_computes_uptime_over_full_history(
+    client: TestClient, db_session: Session
+) -> None:
+    t0 = datetime.now(UTC) - timedelta(hours=2)
+    t1 = t0 + timedelta(hours=1)
+    make_period(db_session, started_at=t0, ended_at=t1, status_severity=6)
+    make_period(db_session, started_at=t1, status_severity=10)
+
+    response = client.get("/lines/bakerloo/stats")
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["line_id"] == "bakerloo"
+    assert body["disruption_count"] == 1
+    assert body["disrupted_seconds"] == pytest.approx(3600)
+    assert 0 < body["uptime_percentage"] < 100

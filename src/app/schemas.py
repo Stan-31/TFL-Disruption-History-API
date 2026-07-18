@@ -44,3 +44,15 @@ class HealthStatus(BaseModel):
     database: Literal["ok"]
     last_successful_poll_at: datetime | None
     poll_interval_seconds: int
+
+
+class LineStats(BaseModel):
+    line_id: str
+    line_name: str
+    mode_name: str
+    window_start: datetime
+    window_end: datetime
+    total_seconds: float
+    disrupted_seconds: float
+    uptime_percentage: float
+    disruption_count: int

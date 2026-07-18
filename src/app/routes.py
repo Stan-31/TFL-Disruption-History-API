@@ -1,12 +1,13 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import LineStatusPeriod
-from app.schemas import LineHistoryPage, LineStatusPeriodOut, LineSummary
+from app.schemas import LineHistoryPage, LineStats, LineStatusPeriodOut, LineSummary
+from app.stats import compute_line_stats
 
 router = APIRouter()
 
@@ -65,4 +66,58 @@ def get_line_history(
         limit=limit,
         offset=offset,
         items=[LineStatusPeriodOut.model_validate(item) for item in items],
+    )
+
+
+@router.get("/lines/{line_id}/stats", response_model=LineStats)
+def get_line_stats(
+    line_id: str,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> LineStats:
+    latest = db.execute(
+        select(LineStatusPeriod)
+        .where(LineStatusPeriod.line_id == line_id)
+        .order_by(LineStatusPeriod.started_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is None:
+        raise HTTPException(status_code=404, detail=f"Unknown line_id: {line_id}")
+
+    window_end = until or datetime.now(UTC)
+    if since is not None:
+        window_start = since
+    else:
+        window_start = db.execute(
+            select(func.min(LineStatusPeriod.started_at)).where(LineStatusPeriod.line_id == line_id)
+        ).scalar_one()
+
+    periods = (
+        db.execute(
+            select(LineStatusPeriod).where(
+                LineStatusPeriod.line_id == line_id,
+                LineStatusPeriod.started_at < window_end,
+                or_(
+                    LineStatusPeriod.ended_at.is_(None),
+                    LineStatusPeriod.ended_at > window_start,
+                ),
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    result = compute_line_stats(periods, window_start=window_start, window_end=window_end)
+
+    return LineStats(
+        line_id=latest.line_id,
+        line_name=latest.line_name,
+        mode_name=latest.mode_name,
+        window_start=window_start,
+        window_end=window_end,
+        total_seconds=result.total_seconds,
+        disrupted_seconds=result.disrupted_seconds,
+        uptime_percentage=round(result.uptime_percentage, 2),
+        disruption_count=result.disruption_count,
     )
