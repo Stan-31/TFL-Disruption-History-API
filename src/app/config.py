@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     tfl_poll_interval_seconds: int = 60
     tfl_modes: str = "tube,overground,dlr,elizabeth-line"
 
+    api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

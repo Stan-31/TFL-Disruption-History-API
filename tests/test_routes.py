@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.db import get_db
 from app.main import app
 from app.models import LineStatusPeriod
@@ -197,3 +198,37 @@ def test_get_line_stats_computes_uptime_over_full_history(
     assert body["disruption_count"] == 1
     assert body["disrupted_seconds"] == pytest.approx(3600)
     assert 0 < body["uptime_percentage"] < 100
+
+
+@pytest.fixture
+def with_api_key(client: TestClient) -> Iterator[None]:
+    app.dependency_overrides[get_settings] = lambda: Settings(api_key="secret")
+    try:
+        yield
+    finally:
+        del app.dependency_overrides[get_settings]
+
+
+def test_data_endpoint_rejects_missing_api_key(client: TestClient, with_api_key: None) -> None:
+    response = client.get("/lines")
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_data_endpoint_rejects_wrong_api_key(client: TestClient, with_api_key: None) -> None:
+    response = client.get("/lines", headers={"X-API-Key": "wrong"})
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_data_endpoint_accepts_correct_api_key(client: TestClient, with_api_key: None) -> None:
+    response = client.get("/lines", headers={"X-API-Key": "secret"})
+    assert response.status_code == HTTPStatus.OK
+
+
+def test_health_endpoint_does_not_require_api_key(client: TestClient, with_api_key: None) -> None:
+    response = client.get("/health")
+    assert response.status_code == HTTPStatus.OK
+
+
+def test_data_endpoint_open_when_no_api_key_configured(client: TestClient) -> None:
+    response = client.get("/lines")
+    assert response.status_code == HTTPStatus.OK

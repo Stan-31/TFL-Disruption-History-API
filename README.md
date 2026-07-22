@@ -25,6 +25,10 @@ history:
   `"degraded"` if the last poll is more than 3x `TFL_POLL_INTERVAL_SECONDS`
   old (or there's never been one), `503` if the database itself is unreachable
 
+If `API_KEY` is set, the four data endpoints above (everything except `/` and
+`/health`) require a matching `X-API-Key` header, `401` otherwise. Unset by
+default -- opt-in, since it's not needed for local dev.
+
 ## Stack
 
 Python 3.12, FastAPI, PostgreSQL (SQLAlchemy 2.x + Alembic), pytest, Docker /
@@ -85,3 +89,7 @@ without leaving data behind.
   set as Railway variables -- none of these carry over from `.env` automatically.
   Live at https://tfl-disruption-history-api-production.up.railway.app, polling
   with a real TfL app key.
+- Bus mode was deliberately left out of `TFL_MODES` -- TfL reports line status
+  for hundreds of bus routes that are almost always "Good Service" (real bus
+  disruptions surface via stop/road disruptions, not line status), so it would
+  balloon the polled dataset for little actual signal.

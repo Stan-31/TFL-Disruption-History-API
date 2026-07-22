@@ -1,15 +1,26 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import LineStatusPeriod
 from app.schemas import LineHistoryPage, LineStats, LineStatusPeriodOut, LineSummary
 from app.stats import GOOD_SERVICE_SEVERITY, compute_line_stats
 
-router = APIRouter()
+
+def require_api_key(
+    x_api_key: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """No-op when API_KEY isn't configured -- opt-in, not required for local dev/CI."""
+    if settings.api_key is not None and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.get("/lines", response_model=list[LineSummary])
