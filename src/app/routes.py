@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -28,7 +28,7 @@ def list_lines(
     mode: str | None = Query(None, description="Filter to one mode, e.g. 'bus' or 'tube'"),
     db: Session = Depends(get_db),
 ) -> list[LineStatusPeriod]:
-    filters = [LineStatusPeriod.ended_at.is_(None)]
+    filters: list[ColumnElement[bool]] = [LineStatusPeriod.ended_at.is_(None)]
     if mode is not None:
         filters.append(LineStatusPeriod.mode_name == mode)
     stmt = select(LineStatusPeriod).where(*filters).order_by(LineStatusPeriod.line_name)
@@ -40,7 +40,7 @@ def list_disruptions(
     mode: str | None = Query(None, description="Filter to one mode, e.g. 'bus' or 'tube'"),
     db: Session = Depends(get_db),
 ) -> list[LineStatusPeriod]:
-    filters = [
+    filters: list[ColumnElement[bool]] = [
         LineStatusPeriod.ended_at.is_(None),
         LineStatusPeriod.status_severity != GOOD_SERVICE_SEVERITY,
     ]
