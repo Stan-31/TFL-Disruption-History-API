@@ -5,7 +5,7 @@ This service polls it on a schedule, persists every observation, and exposes the
 historical record TfL doesn't: how often each line is disrupted, when, for how long,
 and with what severity.
 
-Status: **Phase 6** -- database schema, TfL client, an in-process poller
+Status: **Phase 8** -- database schema, TfL client, an in-process poller
 (default: every 60s, see `TFL_POLL_INTERVAL_SECONDS`, with exponential backoff
 up to 30 minutes on repeated failures), and a read API over the accumulated
 history:
@@ -76,3 +76,9 @@ without leaving data behind.
   `DATABASE_URL` is overridden to point at the `postgres` service hostname instead --
   see `docker-compose.yml`.
 - `GET /` is service metadata, not a health check -- use `GET /health` for that.
+- Deployed on Railway (project `merry-caring`); the service needs its own
+  `DATABASE_URL` (pointing at the project's Postgres plugin, with the
+  `+psycopg` dialect SQLAlchemy expects), `TFL_APP_KEY`, and `ENVIRONMENT=production`
+  set as Railway variables -- none of these carry over from `.env` automatically.
+  Live at https://tfl-disruption-history-api-production.up.railway.app, polling
+  with a real TfL app key.
