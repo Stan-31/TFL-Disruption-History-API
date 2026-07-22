@@ -5,7 +5,7 @@ This service polls it on a schedule, persists every observation, and exposes the
 historical record TfL doesn't: how often each line is disrupted, when, for how long,
 and with what severity.
 
-Status: **Phase 9** -- database schema, TfL client, an in-process poller
+Status: **Phase 10** -- database schema, TfL client, an in-process poller
 (default: every 60s, see `TFL_POLL_INTERVAL_SECONDS`, with exponential backoff
 up to 30 minutes on repeated failures), and a read API over the accumulated
 history:
@@ -85,10 +85,12 @@ without leaving data behind.
 - `GET /` is service metadata, not a health check -- use `GET /health` for that.
 - Deployed on Railway (project `merry-caring`); the service needs its own
   `DATABASE_URL` (pointing at the project's Postgres plugin, with the
-  `+psycopg` dialect SQLAlchemy expects), `TFL_APP_KEY`, and `ENVIRONMENT=production`
-  set as Railway variables -- none of these carry over from `.env` automatically.
-  Live at https://tfl-disruption-history-api-production.up.railway.app, polling
-  with a real TfL app key.
+  `+psycopg` dialect SQLAlchemy expects), `TFL_APP_KEY`, `ENVIRONMENT=production`,
+  and `API_KEY` set as Railway variables -- none of these carry over from
+  `.env` automatically. Live at
+  https://tfl-disruption-history-api-production.up.railway.app, polling with a
+  real TfL app key; the data endpoints there require the production `API_KEY`
+  as an `X-API-Key` header.
 - Bus mode was deliberately left out of `TFL_MODES` -- TfL reports line status
   for hundreds of bus routes that are almost always "Good Service" (real bus
   disruptions surface via stop/road disruptions, not line status), so it would
