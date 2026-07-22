@@ -5,15 +5,17 @@ This service polls it on a schedule, persists every observation, and exposes the
 historical record TfL doesn't: how often each line is disrupted, when, for how long,
 and with what severity.
 
-Status: **Phase 10** -- database schema, TfL client, an in-process poller
+Status: **Phase 11** -- database schema, TfL client, an in-process poller
 (default: every 60s, see `TFL_POLL_INTERVAL_SECONDS`, with exponential backoff
-up to 30 minutes on repeated failures), and a read API over the accumulated
-history:
+up to 30 minutes on repeated failures) covering tube, overground, DLR,
+Elizabeth line, and bus, and a read API over the accumulated history:
 
-- `GET /lines` -- every polled line with its current status
+- `GET /lines` -- every polled line with its current status; optional `mode`
+  query param (e.g. `?mode=bus`) to filter to one mode, since bus alone is
+  hundreds of routes
 - `GET /disruptions` -- currently polled lines that aren't in "Good Service",
   across every mode -- a "what's broken right now" view without checking each
-  line individually
+  line individually; also supports `?mode=`
 - `GET /lines/{line_id}/history` -- paginated status history for one line, most
   recent first (`limit`/`offset`/`since` query params), `404` for an unknown
   `line_id`
@@ -91,7 +93,10 @@ without leaving data behind.
   https://tfl-disruption-history-api-production.up.railway.app, polling with a
   real TfL app key; the data endpoints there require the production `API_KEY`
   as an `X-API-Key` header.
-- Bus mode was deliberately left out of `TFL_MODES` -- TfL reports line status
-  for hundreds of bus routes that are almost always "Good Service" (real bus
-  disruptions surface via stop/road disruptions, not line status), so it would
-  balloon the polled dataset for little actual signal.
+- Bus is included in the default `TFL_MODES`. Most bus routes report "Good
+  Service" almost all the time (real bus disruptions mostly surface via
+  stop/road disruptions rather than line status), so it adds a lot of rows for
+  comparatively little signal -- the `mode` filter on `/lines` and
+  `/disruptions` exists mainly to keep bus's few hundred routes from drowning
+  out everything else. The TfL client's request timeout is 30s (up from 10s)
+  to give the much larger bus response room.

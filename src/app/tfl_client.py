@@ -27,6 +27,8 @@ async def fetch_line_statuses(
     client: httpx.AsyncClient, modes: Sequence[str], app_key: str
 ) -> list[TflLine]:
     url = TFL_STATUS_URL.format(modes=",".join(modes))
-    response = await client.get(url, params={"app_key": app_key}, timeout=10.0)
+    # 30s, not 10s -- bus mode alone returns status for hundreds of routes,
+    # much larger than the handful of lines the other modes report.
+    response = await client.get(url, params={"app_key": app_key}, timeout=30.0)
     response.raise_for_status()
     return [TflLine.model_validate(item) for item in response.json()]

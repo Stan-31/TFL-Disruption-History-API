@@ -80,6 +80,19 @@ def test_list_lines_empty_when_no_data(client: TestClient) -> None:
     assert response.json() == []
 
 
+def test_list_lines_filters_by_mode(client: TestClient, db_session: Session) -> None:
+    now = datetime.now(UTC)
+    make_period(db_session, line_id="134", line_name="134", mode_name="bus", started_at=now)
+    make_period(
+        db_session, line_id="victoria", line_name="Victoria", mode_name="tube", started_at=now
+    )
+
+    response = client.get("/lines", params={"mode": "bus"})
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert [line["line_id"] for line in body] == ["134"]
+
+
 def test_list_disruptions_excludes_good_service(client: TestClient, db_session: Session) -> None:
     now = datetime.now(UTC)
     make_period(
@@ -113,6 +126,33 @@ def test_list_disruptions_excludes_good_service(client: TestClient, db_session: 
     assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert [line["line_id"] for line in body] == ["central"]
+
+
+def test_list_disruptions_filters_by_mode(client: TestClient, db_session: Session) -> None:
+    now = datetime.now(UTC)
+    make_period(
+        db_session,
+        line_id="134",
+        line_name="134",
+        mode_name="bus",
+        started_at=now,
+        status_severity=6,
+        status_severity_description="Severe Delays",
+    )
+    make_period(
+        db_session,
+        line_id="central",
+        line_name="Central",
+        mode_name="tube",
+        started_at=now,
+        status_severity=6,
+        status_severity_description="Severe Delays",
+    )
+
+    response = client.get("/disruptions", params={"mode": "bus"})
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert [line["line_id"] for line in body] == ["134"]
 
 
 def test_list_disruptions_empty_when_all_good_service(

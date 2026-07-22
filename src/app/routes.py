@@ -24,25 +24,29 @@ router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.get("/lines", response_model=list[LineSummary])
-def list_lines(db: Session = Depends(get_db)) -> list[LineStatusPeriod]:
-    stmt = (
-        select(LineStatusPeriod)
-        .where(LineStatusPeriod.ended_at.is_(None))
-        .order_by(LineStatusPeriod.line_name)
-    )
+def list_lines(
+    mode: str | None = Query(None, description="Filter to one mode, e.g. 'bus' or 'tube'"),
+    db: Session = Depends(get_db),
+) -> list[LineStatusPeriod]:
+    filters = [LineStatusPeriod.ended_at.is_(None)]
+    if mode is not None:
+        filters.append(LineStatusPeriod.mode_name == mode)
+    stmt = select(LineStatusPeriod).where(*filters).order_by(LineStatusPeriod.line_name)
     return list(db.execute(stmt).scalars().all())
 
 
 @router.get("/disruptions", response_model=list[LineSummary])
-def list_disruptions(db: Session = Depends(get_db)) -> list[LineStatusPeriod]:
-    stmt = (
-        select(LineStatusPeriod)
-        .where(
-            LineStatusPeriod.ended_at.is_(None),
-            LineStatusPeriod.status_severity != GOOD_SERVICE_SEVERITY,
-        )
-        .order_by(LineStatusPeriod.line_name)
-    )
+def list_disruptions(
+    mode: str | None = Query(None, description="Filter to one mode, e.g. 'bus' or 'tube'"),
+    db: Session = Depends(get_db),
+) -> list[LineStatusPeriod]:
+    filters = [
+        LineStatusPeriod.ended_at.is_(None),
+        LineStatusPeriod.status_severity != GOOD_SERVICE_SEVERITY,
+    ]
+    if mode is not None:
+        filters.append(LineStatusPeriod.mode_name == mode)
+    stmt = select(LineStatusPeriod).where(*filters).order_by(LineStatusPeriod.line_name)
     return list(db.execute(stmt).scalars().all())
 
 
