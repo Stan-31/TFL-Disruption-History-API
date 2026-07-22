@@ -79,6 +79,51 @@ def test_list_lines_empty_when_no_data(client: TestClient) -> None:
     assert response.json() == []
 
 
+def test_list_disruptions_excludes_good_service(client: TestClient, db_session: Session) -> None:
+    now = datetime.now(UTC)
+    make_period(
+        db_session,
+        line_id="victoria",
+        line_name="Victoria",
+        started_at=now,
+        status_severity=10,
+        status_severity_description="Good Service",
+    )
+    make_period(
+        db_session,
+        line_id="central",
+        line_name="Central",
+        started_at=now,
+        status_severity=6,
+        status_severity_description="Severe Delays",
+    )
+    # A closed period shouldn't show up even if it was disrupted while open.
+    make_period(
+        db_session,
+        line_id="bakerloo",
+        line_name="Bakerloo",
+        started_at=now - timedelta(hours=1),
+        ended_at=now,
+        status_severity=9,
+        status_severity_description="Minor Delays",
+    )
+
+    response = client.get("/disruptions")
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert [line["line_id"] for line in body] == ["central"]
+
+
+def test_list_disruptions_empty_when_all_good_service(
+    client: TestClient, db_session: Session
+) -> None:
+    make_period(db_session, started_at=datetime.now(UTC), status_severity=10)
+
+    response = client.get("/disruptions")
+    assert response.status_code == HTTPStatus.OK
+    assert response.json() == []
+
+
 def test_get_line_history_404_for_unknown_line(client: TestClient) -> None:
     response = client.get("/lines/bakerloo/history")
     assert response.status_code == HTTPStatus.NOT_FOUND

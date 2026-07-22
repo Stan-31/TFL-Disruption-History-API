@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import LineStatusPeriod
 from app.schemas import LineHistoryPage, LineStats, LineStatusPeriodOut, LineSummary
-from app.stats import compute_line_stats
+from app.stats import GOOD_SERVICE_SEVERITY, compute_line_stats
 
 router = APIRouter()
 
@@ -17,6 +17,19 @@ def list_lines(db: Session = Depends(get_db)) -> list[LineStatusPeriod]:
     stmt = (
         select(LineStatusPeriod)
         .where(LineStatusPeriod.ended_at.is_(None))
+        .order_by(LineStatusPeriod.line_name)
+    )
+    return list(db.execute(stmt).scalars().all())
+
+
+@router.get("/disruptions", response_model=list[LineSummary])
+def list_disruptions(db: Session = Depends(get_db)) -> list[LineStatusPeriod]:
+    stmt = (
+        select(LineStatusPeriod)
+        .where(
+            LineStatusPeriod.ended_at.is_(None),
+            LineStatusPeriod.status_severity != GOOD_SERVICE_SEVERITY,
+        )
         .order_by(LineStatusPeriod.line_name)
     )
     return list(db.execute(stmt).scalars().all())
