@@ -167,6 +167,63 @@ def test_list_disruptions_empty_when_all_good_service(
     assert response.json() == []
 
 
+def test_list_line_patterns_returns_full_grid_for_one_line(
+    client: TestClient, db_session: Session
+) -> None:
+    # 2026-06-01 08:00 UTC = 09:00 BST on a Monday, inside am_peak.
+    make_period(
+        db_session,
+        started_at=datetime(2026, 6, 1, 8, 0, tzinfo=UTC),
+        ended_at=datetime(2026, 6, 1, 9, 0, tzinfo=UTC),
+        status_severity=6,
+    )
+
+    response = client.get("/lines/patterns")
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert len(body) == 28  # 7 days x 4 time buckets, one line
+    monday_am_peak = next(
+        row for row in body if row["day_of_week"] == "monday" and row["time_bucket"] == "am_peak"
+    )
+    assert monday_am_peak["line_id"] == "bakerloo"
+    assert monday_am_peak["weeks_observed"] == 1
+    assert monday_am_peak["uptime_percentage"] < 100.0
+
+
+def test_list_line_patterns_filters_by_day_and_bucket_and_sorts_worst_first(
+    client: TestClient, db_session: Session
+) -> None:
+    make_period(
+        db_session,
+        line_id="central",
+        line_name="Central",
+        started_at=datetime(2026, 6, 1, 8, 0, tzinfo=UTC),
+        ended_at=datetime(2026, 6, 1, 9, 0, tzinfo=UTC),
+        status_severity=6,
+    )
+    make_period(
+        db_session,
+        line_id="victoria",
+        line_name="Victoria",
+        started_at=datetime(2026, 6, 1, 8, 0, tzinfo=UTC),
+        ended_at=datetime(2026, 6, 1, 9, 0, tzinfo=UTC),
+        status_severity=10,
+    )
+
+    response = client.get(
+        "/lines/patterns", params={"day_of_week": "monday", "time_bucket": "am_peak"}
+    )
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert len(body) == 2
+    assert [row["line_id"] for row in body] == ["central", "victoria"]  # worst (disrupted) first
+
+
+def test_list_line_patterns_rejects_unknown_day_of_week(client: TestClient) -> None:
+    response = client.get("/lines/patterns", params={"day_of_week": "someday"})
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+
+
 def test_get_line_history_404_for_unknown_line(client: TestClient) -> None:
     response = client.get("/lines/bakerloo/history")
     assert response.status_code == HTTPStatus.NOT_FOUND

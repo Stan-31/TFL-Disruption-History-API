@@ -23,6 +23,9 @@ exposes that record through a documented read API.
   360 of them.
 - Serves current status, full history, and computed uptime statistics through
   a REST API, with pagination, time-window filtering, and mode filtering.
+- Answers "which line is worst on Monday mornings" directly, by breaking each
+  line's history into a day-of-week x time-of-day grid rather than only
+  reporting uptime over a single continuous window.
 - Recovers from upstream failures automatically: a flaky TfL API triggers
   exponential backoff instead of hammering the endpoint or crashing the
   service.
@@ -154,6 +157,47 @@ history through now). Returns `404` for an unrecognised `line_id`.
   "disruption_count": 1
 }
 ```
+
+### `GET /lines/patterns`
+
+How lines actually perform, broken down by day of week and time of day —
+answers "which line is worst on Monday mornings" directly, rather than
+requiring a client to pull raw history and work it out. `/lines/{id}/stats`
+reports uptime over one continuous window; this instead reports uptime across
+every recurring occurrence of a day/time combination (every Monday, every
+weekday evening, etc.) across the whole stored history.
+
+Query params (all optional): `mode`, `line_id`, `day_of_week` (one of
+`monday`..`sunday`), `time_bucket` (one of `am_peak` 07:00-10:00, `midday`
+10:00-16:00, `pm_peak` 16:00-19:00, `evening_night` 19:00-07:00, all
+Europe/London local time). Omit `day_of_week`/`time_bucket` to get the full
+7x4 grid per line; supply both to get a single cell per line, sorted
+worst-uptime-first — the direct answer to "which line is worst on Monday
+mornings".
+
+```
+curl "https://tfl-disruption-history-api-production.up.railway.app/lines/patterns?day_of_week=monday&time_bucket=am_peak" \
+  -H "X-API-Key: <your key>"
+```
+
+```json
+[
+  {
+    "line_id": "central",
+    "line_name": "Central",
+    "mode_name": "tube",
+    "day_of_week": "monday",
+    "time_bucket": "am_peak",
+    "uptime_percentage": 78.4,
+    "weeks_observed": 6
+  }
+]
+```
+
+`weeks_observed` is how many occurrences of that day/bucket combination are
+actually behind the percentage. A service that's only been running a few days
+will report real numbers with a `weeks_observed` of 0 or 1 almost everywhere —
+that's not a bug, it's an honest sample size, not a "usual" pattern yet.
 
 ### `GET /health`
 
@@ -298,6 +342,24 @@ A few decisions that aren't obvious from the code alone:
   incorrect constraint, or a query that's only wrong under real transactional
   behaviour. The tradeoff is that the suite needs Postgres available to run at
   all, which is why CI provisions one as a service container.
+- **`/lines/patterns` computes recurring-window overlaps, not a `GROUP BY`.**
+  A stored period is a single continuous stretch of time that can span days or
+  months; answering "how does this line perform on Monday mornings" means
+  intersecting every period against every recurring Monday-07:00-10:00 window
+  it overlaps and summing the result, not grouping rows by a column. The
+  bucket boundaries are computed in Europe/London local time (not UTC) so
+  "morning" doesn't silently shift by an hour across the BST/GMT clock change,
+  and are converted to UTC immediately once computed — subtracting two aware
+  datetimes that carry *different* UTC offsets (one GMT, one BST, either side
+  of a clock change) doesn't reliably produce the correct duration, so all
+  overlap arithmetic happens in a single, unambiguous offset. The walk over
+  each period's span also starts one calendar day before the period itself:
+  the `evening_night` bucket runs from 19:00 to 07:00 the next day, so a
+  period starting at, say, 03:00 can still belong to the *previous* day's
+  night bucket — a day-walk that only started from the period's own start
+  date would silently drop that overlap. Each returned cell reports
+  `weeks_observed` alongside its percentage, since a bare number with no
+  indication of sample size invites reading a coincidence as a pattern.
 
 ## License
 

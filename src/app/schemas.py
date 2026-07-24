@@ -56,3 +56,13 @@ class LineStats(BaseModel):
     disrupted_seconds: float
     uptime_percentage: float
     disruption_count: int
+
+
+class LinePatternOut(BaseModel):
+    line_id: str
+    line_name: str
+    mode_name: str
+    day_of_week: str
+    time_bucket: str
+    uptime_percentage: float
+    weeks_observed: int

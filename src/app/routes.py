@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -7,7 +8,14 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import LineStatusPeriod
-from app.schemas import LineHistoryPage, LineStats, LineStatusPeriodOut, LineSummary
+from app.patterns import DAYS_OF_WEEK, TIME_BUCKETS, compute_line_patterns
+from app.schemas import (
+    LineHistoryPage,
+    LinePatternOut,
+    LineStats,
+    LineStatusPeriodOut,
+    LineSummary,
+)
 from app.stats import GOOD_SERVICE_SEVERITY, compute_line_stats
 
 
@@ -48,6 +56,87 @@ def list_disruptions(
         filters.append(LineStatusPeriod.mode_name == mode)
     stmt = select(LineStatusPeriod).where(*filters).order_by(LineStatusPeriod.line_name)
     return list(db.execute(stmt).scalars().all())
+
+
+@router.get("/lines/patterns", response_model=list[LinePatternOut])
+def list_line_patterns(
+    mode: str | None = Query(None, description="Filter to one mode, e.g. 'tube' or 'overground'"),
+    line_id: str | None = Query(None, description="Restrict to a single line"),
+    day_of_week: str | None = Query(
+        None, description=f"One of: {', '.join(DAYS_OF_WEEK)}. Omit for every day."
+    ),
+    time_bucket: str | None = Query(
+        None, description=f"One of: {', '.join(TIME_BUCKETS)}. Omit for every bucket."
+    ),
+    db: Session = Depends(get_db),
+) -> list[LinePatternOut]:
+    """How each line has actually performed, broken down by day of week and time of day.
+
+    Unlike `/lines/{id}/stats`, which reports uptime over one continuous window,
+    this answers questions like "which line is worst on Monday mornings" by
+    intersecting every stored period against recurring day/time windows across
+    the whole history. `weeks_observed` on each row says how many occurrences of
+    that day/bucket are actually behind the percentage, since a short-running
+    deployment won't have enough Mondays yet for the number to mean much.
+    """
+    if day_of_week is not None and day_of_week not in DAYS_OF_WEEK:
+        raise HTTPException(status_code=400, detail=f"Unknown day_of_week: {day_of_week}")
+    if time_bucket is not None and time_bucket not in TIME_BUCKETS:
+        raise HTTPException(status_code=400, detail=f"Unknown time_bucket: {time_bucket}")
+
+    filters: list[ColumnElement[bool]] = []
+    if mode is not None:
+        filters.append(LineStatusPeriod.mode_name == mode)
+    if line_id is not None:
+        filters.append(LineStatusPeriod.line_id == line_id)
+
+    stmt = (
+        select(LineStatusPeriod)
+        .where(*filters)
+        .order_by(LineStatusPeriod.line_id, LineStatusPeriod.started_at)
+    )
+    all_periods = list(db.execute(stmt).scalars().all())
+
+    periods_by_line: dict[str, list[LineStatusPeriod]] = defaultdict(list)
+    line_meta: dict[str, tuple[str, str]] = {}
+    for period in all_periods:
+        periods_by_line[period.line_id].append(period)
+        line_meta[period.line_id] = (period.line_name, period.mode_name)
+
+    now = datetime.now(UTC)
+    results: list[LinePatternOut] = []
+    for lid, periods in periods_by_line.items():
+        line_name, mode_name = line_meta[lid]
+        for cell in compute_line_patterns(periods, now=now):
+            if day_of_week is not None and cell.day_of_week != day_of_week:
+                continue
+            if time_bucket is not None and cell.time_bucket != time_bucket:
+                continue
+            results.append(
+                LinePatternOut(
+                    line_id=lid,
+                    line_name=line_name,
+                    mode_name=mode_name,
+                    day_of_week=cell.day_of_week,
+                    time_bucket=cell.time_bucket,
+                    uptime_percentage=round(cell.uptime_percentage, 2),
+                    weeks_observed=cell.weeks_observed,
+                )
+            )
+
+    if day_of_week is not None and time_bucket is not None:
+        results.sort(key=lambda r: r.uptime_percentage)
+    else:
+        bucket_order = list(TIME_BUCKETS)
+        results.sort(
+            key=lambda r: (
+                r.line_name,
+                DAYS_OF_WEEK.index(r.day_of_week),
+                bucket_order.index(r.time_bucket),
+            )
+        )
+
+    return results
 
 
 @router.get("/lines/{line_id}/history", response_model=LineHistoryPage)
