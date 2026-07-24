@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     database_url: PostgresDsn
 
     tfl_poll_interval_seconds: int = 60
-    tfl_modes: str = "tube,overground,dlr,elizabeth-line,bus"
+    tfl_modes: str = "tube,overground,dlr,elizabeth-line"
 
     api_key: str | None = None
 

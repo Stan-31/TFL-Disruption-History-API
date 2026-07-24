@@ -25,7 +25,7 @@ router = APIRouter(dependencies=[Depends(require_api_key)])
 
 @router.get("/lines", response_model=list[LineSummary])
 def list_lines(
-    mode: str | None = Query(None, description="Filter to one mode, e.g. 'bus' or 'tube'"),
+    mode: str | None = Query(None, description="Filter to one mode, e.g. 'tube' or 'overground'"),
     db: Session = Depends(get_db),
 ) -> list[LineStatusPeriod]:
     filters: list[ColumnElement[bool]] = [LineStatusPeriod.ended_at.is_(None)]
@@ -37,7 +37,7 @@ def list_lines(
 
 @router.get("/disruptions", response_model=list[LineSummary])
 def list_disruptions(
-    mode: str | None = Query(None, description="Filter to one mode, e.g. 'bus' or 'tube'"),
+    mode: str | None = Query(None, description="Filter to one mode, e.g. 'tube' or 'overground'"),
     db: Session = Depends(get_db),
 ) -> list[LineStatusPeriod]:
     filters: list[ColumnElement[bool]] = [

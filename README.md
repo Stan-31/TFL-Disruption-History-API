@@ -16,8 +16,8 @@ exposes that record through a documented read API.
 
 ## Overview
 
-- Polls the London Underground, Overground, DLR, Elizabeth line, and all
-  ~700 London bus routes every 60 seconds.
+- Polls the London Underground, Overground, DLR, and Elizabeth line every
+  60 seconds.
 - Stores every status change as a discrete time period, not a raw log of
   polls, so a line that holds "Good Service" for six hours is one row, not
   360 of them.
@@ -76,8 +76,8 @@ All responses are JSON. Timestamps are ISO 8601, UTC.
 
 Every currently-tracked line and its current status.
 
-Query params: `mode` (optional) — restrict to one mode, e.g. `bus` or `tube`.
-Useful since bus alone is several hundred routes.
+Query params: `mode` (optional) — restrict to one mode, e.g. `tube` or
+`overground`.
 
 ```
 curl https://tfl-disruption-history-api-production.up.railway.app/lines?mode=tube \
@@ -287,11 +287,12 @@ A few decisions that aren't obvious from the code alone:
   That's the one place the severity scale's meaning is hardcoded, deliberately
   and narrowly, because a disruption-stats endpoint has to draw that line
   somewhere and TfL's own definition is the least arbitrary one available.
-- **Bus support needed its own filter.** Bus alone contributes several
-  hundred routes to `/lines` and `/disruptions`, most of them reporting "Good
-  Service" almost all the time. Without the `mode` query parameter, bus data
-  would dominate both endpoints and bury the much smaller, more meaningful
-  rail dataset.
+- **Bus routes are deliberately not polled.** TfL reports line status for
+  ~700 bus routes, but the overwhelming majority of that volume is routine
+  notices (diversions, roadworks) rather than genuine service disruption.
+  Tracking it added a lot of noise for very little signal in a tool whose
+  point is disruption *history*, so it was tried, measured against real data,
+  and dropped.
 - **Tests run against a real Postgres instance, never mocks.** Mocking the
   database would mean the tests couldn't catch a broken migration, an
   incorrect constraint, or a query that's only wrong under real transactional
