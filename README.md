@@ -1,70 +1,237 @@
 # TfL Disruption History API
 
-TfL's Unified API only exposes *current* line status -- there's no history endpoint.
-This service polls it on a schedule, persists every observation, and exposes the
-historical record TfL doesn't: how often each line is disrupted, when, for how long,
-and with what severity.
+A backend service that answers a question Transport for London's own API can't:
+how reliable is a given line, really, over time?
 
-Status: **Phase 11** -- database schema, TfL client, an in-process poller
-(default: every 60s, see `TFL_POLL_INTERVAL_SECONDS`, with exponential backoff
-up to 30 minutes on repeated failures) covering tube, overground, DLR,
-Elizabeth line, and bus, and a read API over the accumulated history:
+TfL's Unified API only ever reports the current status of a line. There is no
+way to ask it how often the Central line was disrupted last month, how long an
+incident lasted, or what a line's actual uptime looks like over a given week.
+This service closes that gap. It polls TfL's live status feed on a fixed
+schedule, builds a continuous historical record from every observation, and
+exposes that record through a documented read API.
 
-- `GET /lines` -- every polled line with its current status; optional `mode`
-  query param (e.g. `?mode=bus`) to filter to one mode, since bus alone is
-  hundreds of routes
-- `GET /disruptions` -- currently polled lines that aren't in "Good Service",
-  across every mode -- a "what's broken right now" view without checking each
-  line individually; also supports `?mode=`
-- `GET /lines/{line_id}/history` -- paginated status history for one line, most
-  recent first (`limit`/`offset`/`since` query params), `404` for an unknown
-  `line_id`
-- `GET /lines/{line_id}/stats` -- disruption stats for one line over a window
-  (`since`/`until` query params, defaults to full recorded history through
-  now): total/disrupted seconds, uptime %, disruption count. `404` for an
-  unknown `line_id`
-- `GET /health` -- DB connectivity and last successful poll time; `status` is
-  `"degraded"` if the last poll is more than 3x `TFL_POLL_INTERVAL_SECONDS`
-  old (or there's never been one), `503` if the database itself is unreachable
+**Live deployment:** https://tfl-disruption-history-api-production.up.railway.app
+(`/` and `/health` are open; the data endpoints require an API key, see
+[Authentication](#authentication))
 
-If `API_KEY` is set, the four data endpoints above (everything except `/` and
-`/health`) require a matching `X-API-Key` header, `401` otherwise. Unset by
-default -- opt-in, since it's not needed for local dev.
+## Overview
 
-## Stack
+- Polls the London Underground, Overground, DLR, Elizabeth line, and all
+  ~700 London bus routes every 60 seconds.
+- Stores every status change as a discrete time period, not a raw log of
+  polls, so a line that holds "Good Service" for six hours is one row, not
+  360 of them.
+- Serves current status, full history, and computed uptime statistics through
+  a REST API, with pagination, time-window filtering, and mode filtering.
+- Recovers from upstream failures automatically: a flaky TfL API triggers
+  exponential backoff instead of hammering the endpoint or crashing the
+  service.
+- Runs as a single containerised process with automated database migrations,
+  a full test suite against a real database (not mocks), and CI on every
+  push.
 
-Python 3.12, FastAPI, PostgreSQL (SQLAlchemy 2.x + Alembic), pytest, Docker /
-docker-compose, GitHub Actions.
+## Why this exists
 
-## Running locally
+Transport apps and commute-planning tools all consume TfL's current-status
+feed, but none of them can tell you whether a line is reliable. "Minor Delays"
+right now says nothing about whether that line has been disrupted every
+weekday this month. Answering that requires storing history somewhere, and
+TfL doesn't do it. This service does, and turns it into a queryable API rather
+than a one-off script or a spreadsheet.
+
+## Architecture
 
 ```
+┌─────────────┐     poll every 60s      ┌──────────────────┐
+│  TfL Line    │ ───────────────────▶   │   Poller          │
+│  Status API  │                        │  (async, with     │
+└─────────────┘                        │  exponential      │
+                                        │  backoff)         │
+                                        └─────────┬─────────┘
+                                                   │ writes
+                                                   ▼
+                                        ┌──────────────────┐
+                                        │   PostgreSQL      │
+                                        │  line_status_     │
+                                        │  periods          │
+                                        └─────────┬─────────┘
+                                                   │ reads
+                                                   ▼
+                                        ┌──────────────────┐
+       client ◀────────────────────────│    FastAPI        │
+                     JSON               │   read API        │
+                                        └──────────────────┘
+```
+
+The poller and the API run in the same process (one FastAPI app with a
+background asyncio task), backed by one Postgres database. There's no queue,
+cache, or second service: at this scale, that would be complexity the problem
+doesn't need.
+
+## API reference
+
+All responses are JSON. Timestamps are ISO 8601, UTC.
+
+### `GET /lines`
+
+Every currently-tracked line and its current status.
+
+Query params: `mode` (optional) — restrict to one mode, e.g. `bus` or `tube`.
+Useful since bus alone is several hundred routes.
+
+```
+curl https://tfl-disruption-history-api-production.up.railway.app/lines?mode=tube \
+  -H "X-API-Key: <your key>"
+```
+
+```json
+[
+  {
+    "line_id": "central",
+    "line_name": "Central",
+    "mode_name": "tube",
+    "status_severity": 9,
+    "status_severity_description": "Minor Delays",
+    "reason": "Central Line: Minor delays between White City and Ealing Broadway...",
+    "started_at": "2026-07-22T11:01:57Z",
+    "last_seen_at": "2026-07-22T20:22:53Z"
+  }
+]
+```
+
+### `GET /disruptions`
+
+Every line currently in a state other than "Good Service", across all modes.
+Same `mode` filter as above. This is the "what's actually broken right now"
+view, without checking each line one at a time.
+
+### `GET /lines/{line_id}/history`
+
+Paginated status history for one line, most recent period first.
+
+Query params: `since` (ISO timestamp), `limit` (default 50, max 500),
+`offset`. Returns `404` for an unrecognised `line_id`.
+
+```json
+{
+  "line_id": "central",
+  "line_name": "Central",
+  "mode_name": "tube",
+  "total": 42,
+  "limit": 50,
+  "offset": 0,
+  "items": [
+    {
+      "id": 1381,
+      "status_severity": 9,
+      "status_severity_description": "Minor Delays",
+      "reason": "Central Line: Minor delays...",
+      "started_at": "2026-07-22T11:01:57Z",
+      "ended_at": null,
+      "last_seen_at": "2026-07-22T20:22:53Z"
+    }
+  ]
+}
+```
+
+### `GET /lines/{line_id}/stats`
+
+Disruption statistics for one line over a time window.
+
+Query params: `since`, `until` (both optional; default to the full recorded
+history through now). Returns `404` for an unrecognised `line_id`.
+
+```json
+{
+  "line_id": "central",
+  "line_name": "Central",
+  "mode_name": "tube",
+  "window_start": "2026-07-22T11:01:57Z",
+  "window_end": "2026-07-22T20:22:53Z",
+  "total_seconds": 33656,
+  "disrupted_seconds": 33656,
+  "uptime_percentage": 0.0,
+  "disruption_count": 1
+}
+```
+
+### `GET /health`
+
+Database connectivity and poller freshness, for uptime monitoring. Returns
+`"status": "degraded"` if the most recent successful poll is older than three
+times the poll interval (or there's never been one), and a `503` if the
+database itself is unreachable. Never gated by an API key.
+
+### `GET /`
+
+Service metadata only (name, status, environment). Not a substitute for
+`/health`.
+
+## Authentication
+
+Every endpoint above except `/` and `/health` can require a matching
+`X-API-Key` header. It's opt-in at the code level: if the `API_KEY`
+environment variable isn't set, those endpoints stay open, which is what
+local development and CI both do. The production deployment has a key set,
+because a public, unauthenticated read API on a metered hosting plan is an
+easy way to run up a bill. `/` and `/health` are never gated, so uptime
+monitoring and load balancer health checks keep working regardless.
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Language | Python 3.12 |
+| Web framework | FastAPI |
+| Database | PostgreSQL |
+| ORM / migrations | SQLAlchemy 2.0, Alembic |
+| HTTP client | httpx (async) |
+| Testing | pytest, against a real Postgres instance |
+| Linting / types | ruff, mypy (strict mode) |
+| Containerisation | Docker, docker-compose |
+| CI | GitHub Actions |
+| Hosting | Railway |
+
+## Getting started
+
+Requires Docker.
+
+```bash
+git clone https://github.com/Stan-31/TFL-Disruption-History-API.git
+cd TFL-Disruption-History-API
 cp .env.example .env
-# edit .env and set TFL_APP_KEY -- a real key (register at
-# https://api-portal.tfl.gov.uk/) is needed for the poller to actually fetch data;
-# a placeholder still lets the app start, it'll just log failed polls
+```
+
+Edit `.env` and set `TFL_APP_KEY` to a real key from the
+[TfL API Portal](https://api-portal.tfl.gov.uk/) (free to register). A
+placeholder value still lets the app start; the poller will just log failed
+polls until a real key is set.
+
+```bash
 docker compose up --build
 ```
 
-Then visit http://localhost:8000/ -- you should see:
+Visit `http://localhost:8000/`. You should see:
 
 ```json
 {"service": "tfl-disruption-history-api", "status": "ok", "environment": "local"}
 ```
 
-`docker compose up` runs pending Alembic migrations automatically before starting
-the app. With a real `TFL_APP_KEY`, check accumulated history directly:
+`docker compose up` runs pending Alembic migrations automatically before the
+app starts. Once it's been running with a real `TFL_APP_KEY` for a minute or
+two, you can inspect accumulated history directly:
 
-```
+```bash
 docker compose exec postgres psql -U tfl -d tfl_disruption_history \
   -c "select line_id, status_severity_description, started_at, last_seen_at, ended_at from line_status_periods order by line_id;"
 ```
 
-## Tests
+## Running the tests
 
-Requires a running Postgres with migrations applied (the docker-compose one works):
+Requires a running Postgres with migrations applied (the docker-compose one
+works fine):
 
-```
+```bash
 pip install -e ".[dev]"
 alembic upgrade head
 pytest -v
@@ -73,30 +240,64 @@ ruff format --check .
 mypy src tests
 ```
 
-(or run the same commands via `docker compose run --rm app sh -c "pip install -e .[dev] && alembic upgrade head && pytest -v"`
-if Python 3.12 isn't installed on the host.) Tests run inside a transaction that's
-rolled back afterwards, so they're safe to run repeatedly against the same database
-without leaving data behind.
+If Python 3.12 isn't installed on the host, the same commands run inside the
+container:
 
-## Notes
+```bash
+docker compose run --rm app sh -c "pip install -e .[dev] && alembic upgrade head && pytest -v"
+```
 
-- `DATABASE_URL` in `.env` points at `localhost` for running the app directly on the
-  host against the dockerised Postgres. When `app` runs *inside* docker-compose,
-  `DATABASE_URL` is overridden to point at the `postgres` service hostname instead --
-  see `docker-compose.yml`.
-- `GET /` is service metadata, not a health check -- use `GET /health` for that.
-- Deployed on Railway (project `merry-caring`); the service needs its own
-  `DATABASE_URL` (pointing at the project's Postgres plugin, with the
-  `+psycopg` dialect SQLAlchemy expects), `TFL_APP_KEY`, `ENVIRONMENT=production`,
-  and `API_KEY` set as Railway variables -- none of these carry over from
-  `.env` automatically. Live at
-  https://tfl-disruption-history-api-production.up.railway.app, polling with a
-  real TfL app key; the data endpoints there require the production `API_KEY`
-  as an `X-API-Key` header.
-- Bus is included in the default `TFL_MODES`. Most bus routes report "Good
-  Service" almost all the time (real bus disruptions mostly surface via
-  stop/road disruptions rather than line status), so it adds a lot of rows for
-  comparatively little signal -- the `mode` filter on `/lines` and
-  `/disruptions` exists mainly to keep bus's few hundred routes from drowning
-  out everything else. The TfL client's request timeout is 30s (up from 10s)
-  to give the much larger bus response room.
+Each test runs inside a database transaction that's rolled back afterward, so
+the suite is safe to run repeatedly against the same database without
+accumulating test data.
+
+## Deployment
+
+The production instance runs on Railway: one service for the app (built
+straight from the `Dockerfile`, no buildpack) and one for Postgres, in the
+same project. The app service needs these variables set, none of which carry
+over from `.env` automatically:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Must use the `postgresql+psycopg://` scheme (the psycopg 3 driver), not plain `postgresql://` |
+| `TFL_APP_KEY` | A real TfL Unified API key |
+| `ENVIRONMENT` | Set to `production` |
+| `API_KEY` | Enables auth on the read endpoints (see [Authentication](#authentication)) |
+
+`docker compose up` and CI both run migrations automatically; production does
+the same via the container's start command (`alembic upgrade head` before
+`uvicorn` starts).
+
+## Design notes
+
+A few decisions that aren't obvious from the code alone:
+
+- **History is stored as periods, not polls.** Each row in
+  `line_status_periods` represents a continuous stretch of time a line held
+  one status. A new poll either extends the currently open period (if the
+  status hasn't changed) or closes it and opens a new one. This keeps the
+  table small and makes uptime calculations a straightforward interval sum
+  instead of a scan over every poll ever recorded.
+- **Backoff only kicks in after a second consecutive failure.** A single
+  transient failure doesn't change the poll cadence at all; from the second
+  failure onward the delay doubles, capped at 30 minutes, so a sustained
+  outage on TfL's side doesn't turn into a retry storm.
+- **"Disrupted" means anything other than TfL's own "Good Service" code.**
+  That's the one place the severity scale's meaning is hardcoded, deliberately
+  and narrowly, because a disruption-stats endpoint has to draw that line
+  somewhere and TfL's own definition is the least arbitrary one available.
+- **Bus support needed its own filter.** Bus alone contributes several
+  hundred routes to `/lines` and `/disruptions`, most of them reporting "Good
+  Service" almost all the time. Without the `mode` query parameter, bus data
+  would dominate both endpoints and bury the much smaller, more meaningful
+  rail dataset.
+- **Tests run against a real Postgres instance, never mocks.** Mocking the
+  database would mean the tests couldn't catch a broken migration, an
+  incorrect constraint, or a query that's only wrong under real transactional
+  behaviour. The tradeoff is that the suite needs Postgres available to run at
+  all, which is why CI provisions one as a service container.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

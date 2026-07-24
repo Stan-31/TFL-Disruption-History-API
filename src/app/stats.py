@@ -4,7 +4,7 @@ from datetime import datetime
 
 from app.models import LineStatusPeriod
 
-# TfL's statusSeverity code for "Good Service" -- long-stable and
+# TfL's statusSeverity code for "Good Service". It's long-stable and
 # well-documented. This is an intentional, narrow exception to "don't
 # hardcode severity meanings" (see poller.py): a disruption-stats endpoint
 # can't avoid drawing this one line somewhere.

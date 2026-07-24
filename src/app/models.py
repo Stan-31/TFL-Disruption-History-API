@@ -11,9 +11,9 @@ class Base(DeclarativeBase):
 class LineStatusPeriod(Base):
     """A continuous stretch of time a line held a given status severity.
 
-    One row per period, not one row per poll -- `ended_at` is null while the
-    period is ongoing. A partial unique index enforces at most one open period
-    per line.
+    There's one row per period, not one row per poll. `ended_at` is null while
+    the period is ongoing, and a partial unique index enforces at most one open
+    period per line.
     """
 
     __tablename__ = "line_status_periods"

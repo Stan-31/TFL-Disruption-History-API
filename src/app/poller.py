@@ -19,9 +19,8 @@ MAX_BACKOFF_SECONDS = 1800  # 30 minutes
 def next_backoff_seconds(base_interval: int, consecutive_failures: int) -> int:
     """Delay before the next poll attempt, given a run of consecutive failures.
 
-    A single failure doesn't back off at all -- only from the second
-    consecutive failure onward does the delay start doubling, capped at
-    MAX_BACKOFF_SECONDS.
+    A single failure doesn't back off at all. Only from the second consecutive
+    failure onward does the delay start doubling, capped at MAX_BACKOFF_SECONDS.
     """
     if consecutive_failures <= 1:
         return base_interval
@@ -44,7 +43,7 @@ def primary_status(line: TflLine) -> TflLineStatus:
 
     Deterministic tie-break on the lowest statusSeverity value. TfL's severity
     scale isn't a strict "worse is lower" ordering across its full range, so
-    this is a known simplification -- good enough while a line usually only
+    this is a known simplification. It's good enough while a line usually only
     reports one status at a time.
     """
     return min(line.line_statuses, key=lambda status: status.status_severity)
